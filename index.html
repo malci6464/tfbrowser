@@ -3,132 +3,102 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simple Vector Search</title>
+  <title>SQLite Vector Search Demo</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/sql-wasm.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 50px;
-    }
-    #search-box {
-      width: 50%;
-      padding: 15px;
-      font-size: 18px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    #search-button {
-      padding: 15px;
-      font-size: 18px;
-      margin-left: 10px;
-      border: none;
-      background-color: #4285f4;
-      color: white;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #results {
-      margin-top: 30px;
-    }
-    .result-item {
-      padding: 15px;
-      margin: 10px;
-      border: 1px solid #ddd;
-      border-radius: 5px;
-      text-align: left;
-      background-color: #f9f9f9;
-    }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+    #search-box { width: 50%; padding: 15px; font-size: 18px; border: 1px solid #ccc; border-radius: 5px; }
+    #search-button { padding: 15px; font-size: 18px; margin-left: 10px; border: none; background-color: #4285f4; color: white; border-radius: 5px; cursor: pointer; }
+    #results { margin-top: 30px; }
+    .result-item { padding: 15px; margin: 10px; border: 1px solid #ddd; border-radius: 5px; text-align: left; background-color: #f9f9f9; }
   </style>
 </head>
 <body>
 
-  <h1>Vector Search Demo</h1>
-  <input type="text" id="search-box" placeholder="Enter your search query">
-  <button id="search-button">Search</button>
+<h1>SQLite Vector Search Demo</h1>
+<input type="text" id="search-box" placeholder="Enter your search query">
+<button id="search-button">Search</button>
 
-  <div id="results"></div>
+<div id="results"></div>
 
-  <script>
-    // Fake data to simulate chunks
-    const fakeData = [
-      { page: 1, chunk_text: "Employment regulations and rules.", date: "2021-07-01" },
-      { page: 2, chunk_text: "Holiday allowances and regulations.", date: "2020-12-15" },
-      { page: 3, chunk_text: "Health and safety measures at work.", date: "2019-11-22" },
-      { page: 4, chunk_text: "Ordinary working hours and overtime rules.", date: "2021-08-30" },
-      { page: 5, chunk_text: "Regulations on remote work and telecommuting.", date: "2022-05-10" }
-    ];
+<script>
+  let db, model;
 
-    let model;
-    
-    // Load the Universal Sentence Encoder model
-    async function loadModel() {
-      model = await use.load();
-      console.log("Model loaded");
+  async function loadModel() {
+    model = await use.load();
+    console.log("Model loaded");
+  }
+
+  async function initDb() {
+    const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}` });
+    db = new SQL.Database();
+    db.run(`
+      CREATE TABLE chunks (id INTEGER PRIMARY KEY, page INTEGER, chunk_text TEXT, date TEXT);
+      INSERT INTO chunks (page, chunk_text, date) VALUES 
+        (1, 'Employment regulations and rules.', '2021-07-01'),
+        (2, 'Holiday allowances and regulations.', '2020-12-15'),
+        (3, 'Health and safety measures at work.', '2019-11-22'),
+        (4, 'Ordinary working hours and overtime rules.', '2021-08-30'),
+        (5, 'Regulations on remote work and telecommuting.', '2022-05-10');
+    `);
+    console.log("Database initialized");
+  }
+
+  async function handleSearch() {
+    const query = document.getElementById("search-box").value.trim();
+    if (!query) {
+      alert("Please enter a search query.");
+      return;
     }
 
-    // Compute cosine similarity between two vectors
-    function cosineSimilarity(vecA, vecB) {
-      const dotProduct = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
-      const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
-      const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
-      return dotProduct / (magnitudeA * magnitudeB);
-    }
+    const data = getAllData();
+    const queryEmbedding = await model.embed([query]);
+    const queryVector = queryEmbedding.arraySync()[0];
+    const results = data.map(({ chunk_text, ...rest }) => {
+      const chunkVector = model.embed([chunk_text]).arraySync()[0];
+      return { ...rest, chunk_text, similarity: cosineSimilarity(queryVector, chunkVector) };
+    });
 
-    // Handle search
-    async function handleSearch() {
-      const query = document.getElementById("search-box").value;
-      if (!query) {
-        alert("Please enter a search query.");
-        return;
-      }
+    results.sort((a, b) => b.similarity - a.similarity);
+    displayResults(results.slice(0, 3));
+  }
 
-      // Get embeddings for the query and the fake data
-      const queryEmbedding = await model.embed([query]);
-      const queryVector = queryEmbedding.arraySync()[0];
+  function getAllData() {
+    const stmt = db.prepare("SELECT * FROM chunks");
+    const data = [];
+    while (stmt.step()) data.push(stmt.getAsObject());
+    stmt.free();
+    return data;
+  }
 
-      let results = [];
+  function cosineSimilarity(vecA, vecB) {
+    const dotProduct = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
+    const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
+    const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
+    return dotProduct / (magnitudeA * magnitudeB);
+  }
 
-      for (let i = 0; i < fakeData.length; i++) {
-        const chunkEmbedding = await model.embed([fakeData[i].chunk_text]);
-        const chunkVector = chunkEmbedding.arraySync()[0];
-        const similarity = cosineSimilarity(queryVector, chunkVector);
+  function displayResults(results) {
+    const resultsDiv = document.getElementById("results");
+    resultsDiv.innerHTML = results.map(result => `
+      <div class="result-item">
+        <strong>Page:</strong> ${result.page}<br>
+        <strong>Date:</strong> ${result.date}<br>
+        <strong>Text:</strong> ${result.chunk_text}<br>
+        <strong>Similarity:</strong> ${result.similarity.toFixed(4)}
+      </div>
+    `).join("");
+  }
 
-        results.push({ ...fakeData[i], similarity });
-      }
+  window.onload = async () => {
+    await loadModel();
+    await initDb();
+  };
 
-      // Sort results by similarity
-      results.sort((a, b) => b.similarity - a.similarity);
-
-      // Display the top 3 results
-      displayResults(results.slice(0, 3));
-    }
-
-    // Display results
-    function displayResults(results) {
-      const resultsDiv = document.getElementById("results");
-      resultsDiv.innerHTML = "";
-
-      results.forEach(result => {
-        const resultItem = document.createElement("div");
-        resultItem.classList.add("result-item");
-        resultItem.innerHTML = `
-          <strong>Page:</strong> ${result.page}<br>
-          <strong>Date:</strong> ${result.date}<br>
-          <strong>Text:</strong> ${result.chunk_text}<br>
-          <strong>Similarity:</strong> ${result.similarity.toFixed(4)}
-        `;
-        resultsDiv.appendChild(resultItem);
-      });
-    }
-
-    // Load model on page load
-    window.onload = loadModel;
-
-    // Set up event listener for the search button
-    document.getElementById("search-button").addEventListener("click", handleSearch);
-  </script>
+  document.getElementById("search-button").addEventListener("click", handleSearch);
+</script>
 
 </body>
 </html>
