@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Vector Search</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 50px;
+    }
+    #search-box {
+      width: 50%;
+      padding: 15px;
+      font-size: 18px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    #search-button {
+      padding: 15px;
+      font-size: 18px;
+      margin-left: 10px;
+      border: none;
+      background-color: #4285f4;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #results {
+      margin-top: 30px;
+    }
+    .result-item {
+      padding: 15px;
+      margin: 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      text-align: left;
+      background-color: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Vector Search Demo</h1>
+  <input type="text" id="search-box" placeholder="Enter your search query">
+  <button id="search-button">Search</button>
+
+  <div id="results"></div>
+
+  <script>
+    // Fake data to simulate chunks
+    const fakeData = [
+      { page: 1, chunk_text: "Employment regulations and rules.", date: "2021-07-01" },
+      { page: 2, chunk_text: "Holiday allowances and regulations.", date: "2020-12-15" },
+      { page: 3, chunk_text: "Health and safety measures at work.", date: "2019-11-22" },
+      { page: 4, chunk_text: "Ordinary working hours and overtime rules.", date: "2021-08-30" },
+      { page: 5, chunk_text: "Regulations on remote work and telecommuting.", date: "2022-05-10" }
+    ];
+
+    let model;
+    
+    // Load the Universal Sentence Encoder model
+    async function loadModel() {
+      model = await use.load();
+      console.log("Model loaded");
+    }
+
+    // Compute cosine similarity between two vectors
+    function cosineSimilarity(vecA, vecB) {
+      const dotProduct = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
+      const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
+      const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
+      return dotProduct / (magnitudeA * magnitudeB);
+    }
+
+    // Handle search
+    async function handleSearch() {
+      const query = document.getElementById("search-box").value;
+      if (!query) {
+        alert("Please enter a search query.");
+        return;
+      }
+
+      // Get embeddings for the query and the fake data
+      const queryEmbedding = await model.embed([query]);
+      const queryVector = queryEmbedding.arraySync()[0];
+
+      let results = [];
+
+      for (let i = 0; i < fakeData.length; i++) {
+        const chunkEmbedding = await model.embed([fakeData[i].chunk_text]);
+        const chunkVector = chunkEmbedding.arraySync()[0];
+        const similarity = cosineSimilarity(queryVector, chunkVector);
+
+        results.push({ ...fakeData[i], similarity });
+      }
+
+      // Sort results by similarity
+      results.sort((a, b) => b.similarity - a.similarity);
+
+      // Display the top 3 results
+      displayResults(results.slice(0, 3));
+    }
+
+    // Display results
+    function displayResults(results) {
+      const resultsDiv = document.getElementById("results");
+      resultsDiv.innerHTML = "";
+
+      results.forEach(result => {
+        const resultItem = document.createElement("div");
+        resultItem.classList.add("result-item");
+        resultItem.innerHTML = `
+          <strong>Page:</strong> ${result.page}<br>
+          <strong>Date:</strong> ${result.date}<br>
+          <strong>Text:</strong> ${result.chunk_text}<br>
+          <strong>Similarity:</strong> ${result.similarity.toFixed(4)}
+        `;
+        resultsDiv.appendChild(resultItem);
+      });
+    }
+
+    // Load model on page load
+    window.onload = loadModel;
+
+    // Set up event listener for the search button
+    document.getElementById("search-button").addEventListener("click", handleSearch);
+  </script>
+
+</body>
+</html>
