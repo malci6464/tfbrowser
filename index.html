@@ -46,6 +46,8 @@
     console.log("Database initialized");
   }
 
+
+  
   async function handleSearch() {
     const query = document.getElementById("search-box").value.trim();
     if (!query) {
@@ -55,11 +57,12 @@
 
     const data = getAllData();
     const queryEmbedding = await model.embed([query]);
-    const queryVector = queryEmbedding.arraySync()[0];
-    const results = data.map(({ chunk_text, ...rest }) => {
-      const chunkVector = model.embed([chunk_text]).arraySync()[0];
-      return { ...rest, chunk_text, similarity: cosineSimilarity(queryVector, chunkVector) };
-    });
+    const queryVector = await queryEmbedding.array();
+    const results = await Promise.all(data.map(async ({ chunk_text, ...rest }) => {
+      const chunkEmbedding = await model.embed([chunk_text]);
+      const chunkVector = await chunkEmbedding.array();
+      return { ...rest, chunk_text, similarity: cosineSimilarity(queryVector[0], chunkVector[0]) };
+    }));
 
     results.sort((a, b) => b.similarity - a.similarity);
     displayResults(results.slice(0, 3));
